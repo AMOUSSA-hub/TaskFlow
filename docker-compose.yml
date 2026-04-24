@@ -1,0 +1,59 @@
+services:
+  # ── Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    container_name: taskflow-frontend
+    ports:
+      - "80:80"
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ── Backend ──────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: taskflow-backend
+    ports:
+      - "${PORT:-3001}:3001"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://cache:6379
+    networks:
+      - app-network
+      - internal-network
+    restart: unless-stopped
+    depends_on:
+      cache:
+        condition: service_healthy
+
+  # ── Cache (Redis) ────────────────────────────────────────────────────
+  cache:
+    image: redis:7-alpine
+    container_name: taskflow-cache
+    # Pas de ports exposés — accessible uniquement par le backend
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+# ── Réseaux ──────────────────────────────────────────────────────────
+networks:
+  app-network:
+    driver: bridge
+  internal-network:
+    driver: bridge
+    internal: true
+
+# ── Volumes ──────────────────────────────────────────────────────────
+volumes:
+  redis-data:

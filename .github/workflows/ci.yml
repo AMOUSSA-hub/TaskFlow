@@ -1,0 +1,319 @@
+name: TaskFlow CI/CD
+
+# ── Déclencheurs ─────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, staging]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# ── Variables globales ───────────────────────────────────────────────
+env:
+  DOCKER_IMAGE_BACKEND: ${{ secrets.DOCKER_USERNAME }}/taskflow-backend
+  DOCKER_IMAGE_FRONTEND: ${{ secrets.DOCKER_USERNAME }}/taskflow-frontend
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════
+  # Job 1 — Tests (Node 18 + Node 20 en parallèle)
+  # ════════════════════════════════════════════════════════════════════
+  test:
+    name: Tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Run tests
+        run: npm test
+        working-directory: backend
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 2 — Lint (après test)
+  # ════════════════════════════════════════════════════════════════════
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Run ESLint
+        run: npm run lint
+        working-directory: backend
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 3 — Audit (après test)
+  # ════════════════════════════════════════════════════════════════════
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        working-directory: backend
+        continue-on-error: true
+        id: audit
+
+      - name: Save audit report
+        if: steps.audit.outcome == 'failure'
+        run: npm audit --json > audit-report.json || true
+        working-directory: backend
+
+      - name: Upload audit report
+        if: steps.audit.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: backend/audit-report.json
+
+      - name: Fail if audit found vulnerabilities
+        if: steps.audit.outcome == 'failure'
+        run: exit 1
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 4 — Build Docker + Trivy + Push (tags v* uniquement)
+  # ════════════════════════════════════════════════════════════════════
+  build:
+    name: Build & Push Docker
+    runs-on: ubuntu-latest
+    needs: [lint, audit]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ── Build Backend ──────────────────────────────────────────────
+      - name: Build backend image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }} \
+                       -t ${{ env.DOCKER_IMAGE_BACKEND }}:latest \
+                       ./backend
+
+      # ── Trivy Scan Backend ─────────────────────────────────────────
+      - name: Trivy scan backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }}
+          format: "table"
+          output: "trivy-backend-report.txt"
+          severity: "CRITICAL"
+          exit-code: "1"
+        continue-on-error: true
+        id: trivy-backend
+
+      - name: Upload Trivy backend report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-backend-report
+          path: trivy-backend-report.txt
+
+      - name: Fail if Trivy found CRITICAL CVEs (backend)
+        if: steps.trivy-backend.outcome == 'failure'
+        run: |
+          echo "❌ Trivy a détecté des CVE CRITICAL dans l'image backend"
+          cat trivy-backend-report.txt
+          exit 1
+
+      # ── Build Frontend ─────────────────────────────────────────────
+      - name: Build frontend image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }} \
+                       -t ${{ env.DOCKER_IMAGE_FRONTEND }}:latest \
+                       ./frontend
+
+      # ── Trivy Scan Frontend ────────────────────────────────────────
+      - name: Trivy scan frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }}
+          format: "table"
+          output: "trivy-frontend-report.txt"
+          severity: "CRITICAL"
+          exit-code: "1"
+        continue-on-error: true
+        id: trivy-frontend
+
+      - name: Upload Trivy frontend report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-frontend-report
+          path: trivy-frontend-report.txt
+
+      - name: Fail if Trivy found CRITICAL CVEs (frontend)
+        if: steps.trivy-frontend.outcome == 'failure'
+        run: |
+          echo "❌ Trivy a détecté des CVE CRITICAL dans l'image frontend"
+          cat trivy-frontend-report.txt
+          exit 1
+
+      # ── Push images ────────────────────────────────────────────────
+      - name: Push backend image
+        run: |
+          docker push ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }}
+          docker push ${{ env.DOCKER_IMAGE_BACKEND }}:latest
+
+      - name: Push frontend image
+        run: |
+          docker push ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }}
+          docker push ${{ env.DOCKER_IMAGE_FRONTEND }}:latest
+
+      # ── Vérifier la taille de l'image ──────────────────────────────
+      - name: Check backend image size
+        run: |
+          SIZE=$(docker image inspect ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "📦 Taille de l'image backend : ${SIZE_MB} MB"
+          if [ "$SIZE_MB" -gt 200 ]; then
+            echo "❌ L'image dépasse 200 MB !"
+            exit 1
+          fi
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 5 — Deploy Staging (après build, branche staging)
+  # ════════════════════════════════════════════════════════════════════
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+
+      - name: Deploy to staging namespace
+        run: |
+          kubectl apply -f k8s/staging/namespace.yml
+          kubectl apply -f k8s/staging/configmap.yml
+          kubectl apply -f k8s/staging/secret.yml
+          kubectl apply -f k8s/staging/deployment.yml
+          kubectl apply -f k8s/staging/service.yml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/taskflow-backend -n taskflow-staging --timeout=120s
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 6 — Smoke Test (après deploy-staging)
+  # ════════════════════════════════════════════════════════════════════
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+
+      - name: Verify rollout status
+        run: |
+          kubectl rollout status deployment/taskflow-backend -n taskflow-staging --timeout=120s
+
+      - name: Smoke test — GET /health
+        run: |
+          # Port-forward en arrière-plan
+          kubectl port-forward svc/taskflow-backend 3001:3001 -n taskflow-staging &
+          PF_PID=$!
+          sleep 5
+
+          # Vérifier la réponse
+          RESPONSE=$(curl -s http://localhost:3001/health)
+          echo "Réponse /health : $RESPONSE"
+
+          STATUS=$(echo "$RESPONSE" | grep -o '"status":"ok"')
+          kill $PF_PID
+
+          if [ -z "$STATUS" ]; then
+            echo "❌ Smoke test échoué — /health ne retourne pas status: ok"
+            exit 1
+          fi
+          echo "✅ Smoke test passé"
+
+  # ════════════════════════════════════════════════════════════════════
+  # Job 7 — Deploy Production (après build, tags uniquement)
+  # ════════════════════════════════════════════════════════════════════
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+
+      - name: Deploy to production namespace
+        run: |
+          kubectl apply -f k8s/production/namespace.yml
+          kubectl apply -f k8s/production/configmap.yml
+          kubectl apply -f k8s/production/secret.yml
+          kubectl apply -f k8s/production/deployment.yml
+          kubectl apply -f k8s/production/service.yml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/taskflow-backend -n taskflow-production --timeout=120s
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n taskflow-production
+          echo "✅ Production déployée avec succès"
