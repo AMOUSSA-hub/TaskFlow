@@ -241,7 +241,7 @@ jobs:
           kubectl apply -f k8s/staging/namespace.yml
           kubectl apply -f k8s/staging/configmap.yml
           kubectl apply -f k8s/staging/secret.yml
-          kubectl apply -f k8s/staging/deployment.yml
+          envsubst '$DOCKER_IMAGE_BACKEND $DOCKER_IMAGE_FRONTEND' < k8s/staging/deployment.yml | kubectl apply -f -
           kubectl apply -f k8s/staging/service.yml
 
       - name: Wait for rollout
@@ -307,7 +307,7 @@ jobs:
           kubectl apply -f k8s/production/namespace.yml
           kubectl apply -f k8s/production/configmap.yml
           kubectl apply -f k8s/production/secret.yml
-          kubectl apply -f k8s/production/deployment.yml
+          envsubst '$DOCKER_IMAGE_BACKEND $DOCKER_IMAGE_FRONTEND' < k8s/production/deployment.yml | kubectl apply -f -
           kubectl apply -f k8s/production/service.yml
 
       - name: Wait for rollout

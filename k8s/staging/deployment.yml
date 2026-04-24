@@ -1,0 +1,110 @@
+# ── Cache (Redis) ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow-redis
+  namespace: taskflow-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: taskflow-redis
+  template:
+    metadata:
+      labels:
+        app: taskflow-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+
+---
+# ── Backend ──────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow-backend
+  namespace: taskflow-staging
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: taskflow-backend
+  template:
+    metadata:
+      labels:
+        app: taskflow-backend
+    spec:
+      containers:
+        - name: backend
+          image: ${DOCKER_IMAGE_BACKEND}:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: taskflow-config
+            - secretRef:
+                name: taskflow-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+---
+# ── Frontend ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskflow-frontend
+  namespace: taskflow-staging
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: taskflow-frontend
+  template:
+    metadata:
+      labels:
+        app: taskflow-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ${DOCKER_IMAGE_FRONTEND}:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
