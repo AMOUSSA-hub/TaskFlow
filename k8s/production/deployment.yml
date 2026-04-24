@@ -108,3 +108,38 @@ spec:
             limits:
               cpu: "100m"
               memory: "128Mi"
+
+---
+# ── Horizontal Pod Autoscaler (Production) ────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: taskflow-backend-hpa
+  namespace: taskflow-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: taskflow-backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+---
+# ── Pod Disruption Budget (Production) ────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taskflow-backend-pdb
+  namespace: taskflow-production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: taskflow-backend

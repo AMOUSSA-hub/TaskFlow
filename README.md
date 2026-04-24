@@ -1,5 +1,7 @@
 # TaskFlow
 
+![CI Status](https://github.com/AMOUSSA-hub/TaskFlow/actions/workflows/ci.yml/badge.svg)
+
 Application web de gestion de tâches. Interface Kanban avec backend Node.js et persistance Redis.
 
 ## Stack technique

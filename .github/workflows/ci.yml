@@ -131,18 +131,39 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # ── Build Backend ──────────────────────────────────────────────
-      - name: Build backend image
-        run: |
-          docker build -t ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }} \
-                       -t ${{ env.DOCKER_IMAGE_BACKEND }}:latest \
-                       ./backend
+      - name: Build and export backend image locally (for Trivy/Size check)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          load: true
+          tags: ${{ env.DOCKER_IMAGE_BACKEND }}:tmp
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push multi-arch backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }}
+            ${{ env.DOCKER_IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # ── Trivy Scan Backend ─────────────────────────────────────────
       - name: Trivy scan backend
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }}
+          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:tmp
           format: "table"
           output: "trivy-backend-report.txt"
           severity: "CRITICAL"
@@ -165,17 +186,32 @@ jobs:
           exit 1
 
       # ── Build Frontend ─────────────────────────────────────────────
-      - name: Build frontend image
-        run: |
-          docker build -t ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }} \
-                       -t ${{ env.DOCKER_IMAGE_FRONTEND }}:latest \
-                       ./frontend
+      - name: Build and export frontend image locally (for Trivy)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          load: true
+          tags: ${{ env.DOCKER_IMAGE_FRONTEND }}:tmp
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push multi-arch frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }}
+            ${{ env.DOCKER_IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # ── Trivy Scan Frontend ────────────────────────────────────────
       - name: Trivy scan frontend
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }}
+          image-ref: ${{ env.DOCKER_IMAGE_FRONTEND }}:tmp
           format: "table"
           output: "trivy-frontend-report.txt"
           severity: "CRITICAL"
@@ -197,21 +233,13 @@ jobs:
           cat trivy-frontend-report.txt
           exit 1
 
-      # ── Push images ────────────────────────────────────────────────
-      - name: Push backend image
-        run: |
-          docker push ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }}
-          docker push ${{ env.DOCKER_IMAGE_BACKEND }}:latest
 
-      - name: Push frontend image
-        run: |
-          docker push ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ steps.version.outputs.TAG }}
-          docker push ${{ env.DOCKER_IMAGE_FRONTEND }}:latest
+      # Les images ont déjà été pushées par build-push-action
 
       # ── Vérifier la taille de l'image ──────────────────────────────
       - name: Check backend image size
         run: |
-          SIZE=$(docker image inspect ${{ env.DOCKER_IMAGE_BACKEND }}:${{ steps.version.outputs.TAG }} --format='{{.Size}}')
+          SIZE=$(docker image inspect ${{ env.DOCKER_IMAGE_BACKEND }}:tmp --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "📦 Taille de l'image backend : ${SIZE_MB} MB"
           if [ "$SIZE_MB" -gt 200 ]; then
