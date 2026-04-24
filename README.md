@@ -25,33 +25,11 @@ taskflow/
 └── README.md
 ```
 
-## Lancer le projet en local
+## Lancer le projet avec Docker Compose
 
 ### Prérequis
 
-- Node.js 18+
-- Docker Desktop démarré (pour lancer Redis)
-
-### Lancer Redis
-
-Redis tourne dans un container Docker — pas besoin de l'installer sur ta machine.
-
-```bash
-docker run -d -p 6379:6379 --name redis-dev redis:7-alpine
-```
-
-Pour vérifier que Redis tourne :
-
-```bash
-docker ps
-# → redis-dev doit être listé en "Up"
-```
-
-Pour arrêter Redis :
-
-```bash
-docker stop redis-dev && docker rm redis-dev
-```
+- Docker Desktop démarré
 
 ### 1. Cloner le projet
 
@@ -66,19 +44,48 @@ cd taskflow
 cp .env.example .env
 ```
 
-### 3. Installer les dépendances et lancer le backend
+### 3. Build et démarrage des 3 services
 
 ```bash
+docker compose up --build -d
+```
+
+### 4. Vérifications rapides
+
+```bash
+docker compose ps
+curl http://localhost:3001/health
+```
+
+### 5. Arrêt des services
+
+```bash
+docker compose down
+```
+
+### Prouver la persistance Redis (oral)
+
+```bash
+# Ecrire une valeur dans Redis
+docker compose exec cache redis-cli SET demo "ok"
+
+# Stopper la stack puis la relancer
+docker compose down
+docker compose up -d
+
+# Vérifier que la valeur est encore présente
+docker compose exec cache redis-cli GET demo
+```
+
+Ne pas utiliser `docker compose down -v` pour ce test, sinon le volume est supprimé.
+
+## Lancer le backend sans Docker (optionnel)
+
+```bash
+docker run -d -p 6379:6379 --name redis-dev redis:7-alpine
 cd backend
 npm install
 npm start
-```
-
-### 4. Vérifier que l'API répond
-
-```bash
-curl http://localhost:3001/health
-# → { "status": "ok", "redis": "connected", ... }
 ```
 
 ## Tests et lint
