@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ${DOCKER_IMAGE_BACKEND}:latest
+          image: remontadaa/taskflow-backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3001
@@ -97,7 +97,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ${DOCKER_IMAGE_FRONTEND}:latest
+          image: remontadaa/taskflow-backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 80
