@@ -231,10 +231,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
       - name: Setup kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+          KUBE_CONFIG_CONTENT='${{ secrets.KUBE_CONFIG_STAGING }}'
+
+          if [ -z "$KUBE_CONFIG_CONTENT" ]; then
+            echo "❌ Secret KUBE_CONFIG_STAGING manquant ou vide"
+            exit 1
+          fi
+
+          if echo "$KUBE_CONFIG_CONTENT" | grep -q "apiVersion:"; then
+            printf "%s" "$KUBE_CONFIG_CONTENT" > $HOME/.kube/config
+          else
+            printf "%s" "$KUBE_CONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+          fi
+
+          test -s $HOME/.kube/config
+          kubectl config get-contexts
+          kubectl cluster-info
 
       - name: Deploy to staging namespace
         run: |
@@ -256,10 +276,30 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-staging
     steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
       - name: Setup kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+          KUBE_CONFIG_CONTENT='${{ secrets.KUBE_CONFIG_STAGING }}'
+
+          if [ -z "$KUBE_CONFIG_CONTENT" ]; then
+            echo "❌ Secret KUBE_CONFIG_STAGING manquant ou vide"
+            exit 1
+          fi
+
+          if echo "$KUBE_CONFIG_CONTENT" | grep -q "apiVersion:"; then
+            printf "%s" "$KUBE_CONFIG_CONTENT" > $HOME/.kube/config
+          else
+            printf "%s" "$KUBE_CONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+          fi
+
+          test -s $HOME/.kube/config
+          kubectl config get-contexts
+          kubectl cluster-info
 
       - name: Verify rollout status
         run: |
@@ -297,10 +337,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
       - name: Setup kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+          KUBE_CONFIG_CONTENT='${{ secrets.KUBE_CONFIG_PRODUCTION }}'
+
+          if [ -z "$KUBE_CONFIG_CONTENT" ]; then
+            echo "❌ Secret KUBE_CONFIG_PRODUCTION manquant ou vide"
+            exit 1
+          fi
+
+          if echo "$KUBE_CONFIG_CONTENT" | grep -q "apiVersion:"; then
+            printf "%s" "$KUBE_CONFIG_CONTENT" > $HOME/.kube/config
+          else
+            printf "%s" "$KUBE_CONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+          fi
+
+          test -s $HOME/.kube/config
+          kubectl config get-contexts
+          kubectl cluster-info
 
       - name: Deploy to production namespace
         run: |
